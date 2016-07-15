@@ -1,10 +1,10 @@
 package com.im4j.kakacache.rxjava.netcache.retrofit;
 
+import com.im4j.kakacache.rxjava.KakaCache;
 import com.im4j.kakacache.rxjava.common.utils.LogUtils;
 import com.im4j.kakacache.rxjava.common.utils.Utils;
-import com.im4j.kakacache.rxjava.netcache.KakaCache;
 import com.im4j.kakacache.rxjava.netcache.ResultData;
-import com.im4j.kakacache.rxjava.netcache.strategy.FirstCacheStrategy;
+import com.im4j.kakacache.rxjava.netcache.strategy.CacheStrategy;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.ParameterizedType;
@@ -29,18 +29,11 @@ import rx.exceptions.Exceptions;
  * @version alafighting 2016-07
  */
 public class KakaRxCallAdapterFactory extends CallAdapter.Factory {
-    /**
-     * Returns an instance which creates synchronous observables that do not operate on any scheduler
-     * by default.
-     */
+
     public static KakaRxCallAdapterFactory create() {
         return new KakaRxCallAdapterFactory(null);
     }
 
-    /**
-     * Returns an instance which creates synchronous observables that
-     * {@linkplain Observable#subscribeOn(Scheduler) subscribe on} {@code scheduler} by default.
-     */
     public static KakaRxCallAdapterFactory createWithScheduler(Scheduler scheduler) {
         if (scheduler == null) throw new NullPointerException("scheduler == null");
         return new KakaRxCallAdapterFactory(scheduler);
@@ -68,17 +61,11 @@ public class KakaRxCallAdapterFactory extends CallAdapter.Factory {
         }
 
         if (isCompletable) {
-            // Add Completable-converter wrapper from a separate class. This defers classloading such that
-            // regular Observable operation can be leveraged without relying on this unstable RxJava API.
-            // Note that this has to be done separately since Completable doesn't have a parametrized
-            // type.
             return CompletableHelper.createCallAdapter(scheduler);
         }
 
         CallAdapter<Observable<?>> callAdapter = getCallAdapter(returnType, annotations, scheduler);
         if (isSingle) {
-            // Add Single-converter wrapper from a separate class. This defers classloading such that
-            // regular Observable operation can be leveraged without relying on this unstable RxJava API.
             return SingleHelper.makeSingle(callAdapter);
         }
         return callAdapter;
@@ -107,21 +94,25 @@ public class KakaRxCallAdapterFactory extends CallAdapter.Factory {
             if (ResultData.class.equals(Utils.getRawType(responseType()))) {
                 // 启用缓存
                 CacheInfo info = CacheInfo.get(annotations);
-                LogUtils.e(info);
+                LogUtils.log(info);
                 if (info.isEnable()) {
                     // 处理缓存
 
                     if (Utils.isEmpty(info.getKey())) {
                         // 生成KEY
-                        String key = info.buildKey(call.request());
-                        LogUtils.e("buildKey="+key);
+                        String key = Utils.buildKey(call.request());
+                        LogUtils.log("buildKey="+key);
                         info.setKey(ByteString.of(key.getBytes()).md5().hex());
                     }
 
-                    LogUtils.e("fileName="+info.getKey());
+                    LogUtils.log("fileName="+info.getKey());
+
+                    if (info.getStrategy() == null) {
+                        info.setStrategy(CacheStrategy.FirstCache);
+                    }
 
                     return callAdapter.doAdaptUnwrap(call)
-                            .compose(KakaCache.transformer(info.getKey(), new FirstCacheStrategy()));
+                            .compose(KakaCache.transformer(info.getKey(), info.getStrategy()));
                 }
 
                 return callAdapter.doAdaptUnwrap(call);

@@ -1,23 +1,31 @@
 package com.im4j.kakacache.rxjava.common.utils;
 
+import android.content.Context;
+import android.os.Environment;
+
 import com.im4j.kakacache.rxjava.common.exception.ArgumentException;
+import com.im4j.kakacache.rxjava.common.exception.InstanceException;
 import com.im4j.kakacache.rxjava.common.exception.NullException;
 
+import java.io.Closeable;
+import java.io.File;
+import java.io.IOException;
 import java.lang.reflect.Array;
 import java.lang.reflect.GenericArrayType;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.lang.reflect.TypeVariable;
 import java.lang.reflect.WildcardType;
-import java.util.Arrays;
+
+import okhttp3.Request;
+import okio.Buffer;
+import okio.ByteString;
 
 /**
  * 工具类
  * @version alafighting 2016-04
  */
 public final class Utils {
-
-    static final Type[] EMPTY_TYPE_ARRAY = new Type[0];
 
     private Utils() {
     }
@@ -28,15 +36,6 @@ public final class Utils {
     public static <T> T checkNotNull(T obj) {
         if (obj == null) {
             throw new NullException("Can not be empty.");
-        }
-        return obj;
-    }
-    /**
-     * 不为空
-     */
-    public static <T> T checkNotNull(T obj, String message) {
-        if (obj == null) {
-            throw new NullException(message);
         }
         return obj;
     }
@@ -53,10 +52,7 @@ public final class Utils {
     }
 
     public static boolean isEmpty(String str) {
-        if (str == null || str.isEmpty()) {
-            return true;
-        }
-        return false;
+        return str == null || str.isEmpty();
     }
 
 
@@ -67,21 +63,6 @@ public final class Utils {
                     + "; regionLength=" + count);
         }
     }
-    public static void checkOffsetAndCount(int offset, int count) {
-        if ((offset | count) < 0) {
-            throw new ArrayIndexOutOfBoundsException("regionStart=" + offset
-                    + "; regionLength=" + count);
-        }
-    }
-    public static void checkBytes(byte[] array, int len) {
-        if (len < 0) {
-            throw new ArrayIndexOutOfBoundsException("len=" + len);
-        }
-        if (array == null || array.length != len) {
-            throw new ArrayIndexOutOfBoundsException("array=" + len+"; len="+len);
-        }
-    }
-
 
     /**
      * 取父类泛型
@@ -168,61 +149,99 @@ public final class Utils {
                 + "GenericArrayType, but <" + type + "> is of type " + type.getClass().getName());
     }
 
-    public static String typeToString(Type type) {
-        return type instanceof Class ? ((Class<?>) type).getName() : type.toString();
-    }
-
-    public static boolean equals(Type a, Type b) {
-        if (a == b) {
-            return true; // Also handles (a == null && b == null).
-
-        } else if (a instanceof Class) {
-            return a.equals(b); // Class already specifies equals().
-
-        } else if (a instanceof ParameterizedType) {
-            if (!(b instanceof ParameterizedType)) return false;
-            ParameterizedType pa = (ParameterizedType) a;
-            ParameterizedType pb = (ParameterizedType) b;
-            return equal(pa.getOwnerType(), pb.getOwnerType())
-                    && pa.getRawType().equals(pb.getRawType())
-                    && Arrays.equals(pa.getActualTypeArguments(), pb.getActualTypeArguments());
-
-        } else if (a instanceof GenericArrayType) {
-            if (!(b instanceof GenericArrayType)) return false;
-            GenericArrayType ga = (GenericArrayType) a;
-            GenericArrayType gb = (GenericArrayType) b;
-            return equals(ga.getGenericComponentType(), gb.getGenericComponentType());
-
-        } else if (a instanceof WildcardType) {
-            if (!(b instanceof WildcardType)) return false;
-            WildcardType wa = (WildcardType) a;
-            WildcardType wb = (WildcardType) b;
-            return Arrays.equals(wa.getUpperBounds(), wb.getUpperBounds())
-                    && Arrays.equals(wa.getLowerBounds(), wb.getLowerBounds());
-
-        } else if (a instanceof TypeVariable) {
-            if (!(b instanceof TypeVariable)) return false;
-            TypeVariable<?> va = (TypeVariable<?>) a;
-            TypeVariable<?> vb = (TypeVariable<?>) b;
-            return va.getGenericDeclaration() == vb.getGenericDeclaration()
-                    && va.getName().equals(vb.getName());
-
-        } else {
-            return false; // This isn't a type we support!
+    public static <T> T newInstance(Class<T> clazz) {
+        try {
+            return clazz.newInstance();
+        } catch (InstantiationException e) {
+            throw new InstanceException(e.getMessage());
+        } catch (IllegalAccessException e) {
+            throw new InstanceException(e.getMessage());
         }
     }
 
-    private static boolean equal(Object a, Object b) {
-        return a == b || (a != null && a.equals(b));
+    /**
+     * 根据Request生成唯一KEY
+     * @param request
+     * @return
+     */
+    public static String buildKey(Request request) {
+        StringBuilder str = new StringBuilder();
+        str.append('[');
+        str.append(request.method());
+        str.append(']');
+        str.append('[');
+        str.append(request.url());
+        str.append(']');
+
+
+        try {
+            Buffer buffer = new Buffer();
+            request.body().writeTo(buffer);
+            str.append(buffer.readByteString().sha1().hex());
+        } catch (IOException e) {
+            LogUtils.log(e);
+            return "";
+        }
+
+        str.append('-');
+        str.append(ByteString.of(request.headers().toString().getBytes()).sha1().hex());
+
+        return str.toString();
     }
 
-    public static int hashCodeOrZero(Object o) {
-        return o != null ? o.hashCode() : 0;
+
+
+    public static final String SEPARATOR = File.separator;
+    /**
+     * 获取缓存目录路径
+     * <p><b>
+     * ！注意：若不存在，则返回null
+     * </b></p>
+     * @param context
+     * @return 返回:/storage/sdcard0/Android/data/you_packageName/cache/
+     */
+    public static File getStorageCacheDir(Context context) {
+        if (!canUseSDCard()) {
+            return getDataCacheDir(context);
+        }
+
+        File path = Environment.getExternalStorageDirectory();
+        if (path == null) {
+            return getDataCacheDir(context);
+        }
+
+        return new File(path.getAbsolutePath() + SEPARATOR + "Android" + SEPARATOR + "data" + SEPARATOR
+                + context.getPackageName() + SEPARATOR + "cache" + SEPARATOR);
+    }
+    static File getDataCacheDir(Context context) {
+        return context.getCacheDir();
     }
 
-    public static void checkNotPrimitive(Type type) {
-        if (type instanceof Class<?> && ((Class<?>) type).isPrimitive()) {
-            throw new IllegalArgumentException();
+    /**
+     * SDCard是否可用
+     * <p>PS：一定存在</p>
+     * @return
+     */
+    public static boolean canUseSDCard() {
+        if (Environment.MEDIA_MOUNTED.equals(Environment.getExternalStorageState())) {
+            // 是否可写
+            return Environment.getExternalStorageDirectory().canWrite();
+        }
+        return false;
+    }
+
+    public static void close(Closeable close) {
+        if (close != null) {
+            try {
+                closeThrowException(close);
+            } catch (IOException ignored) {
+            }
+        }
+    }
+
+    public static void closeThrowException(Closeable close) throws IOException {
+        if (close != null) {
+            close.close();
         }
     }
 

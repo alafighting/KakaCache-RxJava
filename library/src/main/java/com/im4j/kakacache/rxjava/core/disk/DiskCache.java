@@ -12,9 +12,7 @@ import com.im4j.kakacache.rxjava.core.disk.sink.Sink;
 import com.im4j.kakacache.rxjava.core.disk.source.Source;
 import com.im4j.kakacache.rxjava.core.disk.storage.IDiskStorage;
 
-import java.io.IOException;
 import java.util.Collection;
-import java.util.List;
 
 /**
  * 磁盘缓存
@@ -52,35 +50,29 @@ public final class DiskCache extends Cache {
         T value = null;
         if (source != null) {
             value = (T) mConverter.load(source, new TypeToken<T>(){}.getType());
-        }
-        try {
-            source.close();
-        } catch (IOException e) {
+            Utils.close(source);
         }
         return value;
     }
 
     /**
      * 保存
-     * @param expires 有效期（单位：秒）
+     * @param maxAge 最大有效期时长（单位：毫秒）
      */
     @Override
-    protected <T> void doSave(String key, T value, int expires, CacheTarget target) throws CacheException {
+    protected <T> void doSave(String key, T value, int maxAge, CacheTarget target) throws CacheException {
         if (target == null || target == CacheTarget.NONE || target == CacheTarget.Memory) {
             return;
         }
 
         // 写入缓存
         Sink sink = mStorage.create(key);
-        mConverter.writer(sink, value);
-        try {
-            sink.close();
-        } catch (IOException e) {
-        }
+        if (sink != null) {
+            mConverter.writer(sink, value);
+            Utils.close(sink);
 
-        long createTime = System.currentTimeMillis();
-        long expiresTime = createTime + expires;
-        mJournal.put(key, new CacheEntry(key, createTime, expiresTime, target));
+            mJournal.put(key, new CacheEntry(key, maxAge, target));
+        }
     }
 
     @Override

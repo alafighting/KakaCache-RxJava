@@ -2,6 +2,7 @@ package com.im4j.kakacache.rxjava.core.disk.storage;
 
 import com.im4j.kakacache.rxjava.common.exception.CacheException;
 import com.im4j.kakacache.rxjava.common.exception.NotFoundException;
+import com.im4j.kakacache.rxjava.common.utils.LogUtils;
 import com.im4j.kakacache.rxjava.common.utils.Utils;
 import com.im4j.kakacache.rxjava.core.disk.sink.FileSink;
 import com.im4j.kakacache.rxjava.core.disk.sink.Sink;
@@ -36,7 +37,11 @@ public class FileDiskStorage implements IDiskStorage {
         if (Utils.isEmpty(key)) {
             return null;
         }
-        return new FileSource(new File(mStorageDir, key));
+        File file = new File(mStorageDir, key);
+        if (!file.exists() || !file.isFile()) {
+            return null;
+        }
+        return new FileSource(file);
     }
 
     @Override
@@ -44,7 +49,17 @@ public class FileDiskStorage implements IDiskStorage {
         if (Utils.isEmpty(key)) {
             return null;
         }
-        return new FileSink(new File(mStorageDir, key));
+        File file = new File(mStorageDir, key);
+        if (!exists(file) || file.isDirectory()) {
+            try {
+                LogUtils.debug("createNewFile => "+file);
+                file.createNewFile();
+            } catch (IOException e) {
+                LogUtils.log(e);
+                return null;
+            }
+        }
+        return new FileSink(file);
     }
 
     @Override
@@ -73,6 +88,9 @@ public class FileDiskStorage implements IDiskStorage {
 
     @Override
     public void remove(String key) throws CacheException {
+        if (Utils.isEmpty(key)) {
+            return;
+        }
         try {
             delete(new File(mStorageDir, key));
         } catch (IOException e) {
@@ -91,7 +109,7 @@ public class FileDiskStorage implements IDiskStorage {
 
     @Override
     public long getTotalSize() {
-        return size(mStorageDir);
+        return countSize(mStorageDir);
     }
 
     @Override
@@ -101,32 +119,25 @@ public class FileDiskStorage implements IDiskStorage {
 
 
 
+    public boolean exists(File file) {
+        return file != null && file.exists();
+    }
+
+    private long countSize(File file) {
+        return file.length();
+    }
+
     public void delete(File file) throws IOException {
+        if (file == null) {
+            return;
+        }
         // If delete() fails, make sure it's because the file didn't exist!
         if (!file.delete() && file.exists()) {
             throw new IOException("failed to delete " + file);
         }
     }
 
-    public boolean exists(File file) {
-        if (file == null) {
-            return false;
-        }
-        return file.exists();
-    }
-
-    public long size(File file) {
-        return file.length();
-    }
-
-    public void rename(File from, File to) throws IOException {
-        delete(to);
-        if (!from.renameTo(to)) {
-            throw new IOException("failed to rename " + from + " to " + to);
-        }
-    }
-
-    public void deleteContents(File directory) throws IOException {
+    private void deleteContents(File directory) throws IOException {
         File[] files = directory.listFiles();
         if (files == null) {
             throw new IOException("not a readable directory: " + directory);

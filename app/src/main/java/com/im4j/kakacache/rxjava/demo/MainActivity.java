@@ -3,20 +3,14 @@ package com.im4j.kakacache.rxjava.demo;
 import android.os.Bundle;
 import android.support.annotation.Nullable;
 import android.support.v7.app.AppCompatActivity;
-import android.util.Log;
 import android.widget.Button;
 
+import com.im4j.kakacache.rxjava.KakaCache;
 import com.im4j.kakacache.rxjava.common.utils.LogUtils;
-import com.im4j.kakacache.rxjava.netcache.KakaCache;
-import com.im4j.kakacache.rxjava.netcache.retrofit.KakaRxCallAdapterFactory;
-import com.im4j.kakacache.rxjava.netcache.strategy.CacheAndRemoteStrategy;
-
-import java.util.concurrent.TimeUnit;
+import com.im4j.kakacache.rxjava.netcache.strategy.CacheStrategy;
 
 import retrofit2.Retrofit;
-import retrofit2.converter.gson.GsonConverterFactory;
-import rx.Observable;
-import rx.Subscriber;
+import rx.android.schedulers.AndroidSchedulers;
 import rx.schedulers.Schedulers;
 
 /**
@@ -24,7 +18,10 @@ import rx.schedulers.Schedulers;
  * @version alafighting 2016-06
  */
 public class MainActivity extends AppCompatActivity {
-    static final String KEY_CACHE = "key_cache";
+    static final String KEY_CACHE = "key_cache_listRepos";
+
+    private Retrofit retrofit;
+    private GitHubService service;
 
     private Button btnTestCache;
     private Button btnTestRetrofit;
@@ -34,54 +31,57 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.actiity_main);
 
+        LogUtils.DEBUG = false;
+        KakaCache.init(this);
+
+        retrofit = new Retrofit.Builder()
+                .baseUrl("https://api.github.com/")
+                .addConverterFactory(KakaCache.gsonConverter())
+                .addCallAdapterFactory(KakaCache.rxCallAdapter())
+                .build();
+
+        service = retrofit.create(GitHubService.class);
+
         btnTestCache = (Button) findViewById(R.id.btn_test_cache);
         btnTestCache.setOnClickListener(view -> {
-            remote().compose(KakaCache.transformer(KEY_CACHE, new CacheAndRemoteStrategy())).subscribe(data -> {
-                Log.e("main", "next  data=" + data);
-            }, error -> {
-                Log.e("main", "error", error);
-            }, () -> {
-                Log.e("main", "completed");
-            });
+            demoForNormal();
         });
 
         btnTestRetrofit = (Button) findViewById(R.id.btn_test_retrofit);
         btnTestRetrofit.setOnClickListener(view -> {
-            Retrofit retrofit = new Retrofit.Builder()
-                    .baseUrl("https://api.github.com/")
-                    .addConverterFactory(GsonConverterFactory.create(KakaCache.gson().create()))
-                    .addCallAdapterFactory(KakaRxCallAdapterFactory.create())
-                    .build();
-
-            GitHubService service = retrofit.create(GitHubService.class);
-
-//            // 不修改原有代码，增加对Cache的支持
-//            service.listRepos("octocat").compose(KakaCache.transformer(KEY_CACHE, new FirstCacheStrategy())).subscribeOn(Schedulers.io()).subscribe(data -> {
-//                LogUtils.e(data);
-//            }, error -> {
-//                LogUtils.e(error);
-//            });
-
-            // 通过注解，自动支持Cache
-            service.listRepos("octocat", "abc")
-                    .subscribeOn(Schedulers.io())
-                    .subscribe(data -> {
-                LogUtils.e(data);
-            }, error -> {
-                LogUtils.e(error);
-            });
+            demoForKaka();
         });
     }
 
-    private rx.Observable<String> remote() {
-        return Observable.create(new Observable.OnSubscribe<String>() {
-            @Override
-            public void call(Subscriber<? super String> subscriber) {
-                Log.e("main", "loadRemote");
-                subscriber.onNext("test remote");
-                subscriber.onCompleted();
-            }
-        }).delay(3, TimeUnit.SECONDS);
+    /**
+     * 案例一：不修改原有代码，增加对Cache的支持
+     */
+    void demoForNormal() {
+        service.listReposForNormal("alafighting")
+                .compose(KakaCache.transformer(KEY_CACHE, CacheStrategy.FirstCache))
+                .subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(data -> {
+                    LogUtils.log("next  data=" + data);
+                }, error -> {
+                    LogUtils.log("error", error);
+                }, () -> {
+                    LogUtils.log("completed");
+                });
+    }
+
+    /**
+     * 案例二：通过注解，自动支持Cache
+     */
+    void demoForKaka() {
+        service.listReposForKaka("alafighting")
+                .subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(data -> {
+                    LogUtils.log("listReposForKaka => "+data);
+                }, error -> {
+                    LogUtils.log(error);
+                });
     }
 
 }
